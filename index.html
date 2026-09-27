@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Day Pulse</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --bg:#FBF9F5; --surface:#FFFFFF; --surface-2:#F3EFE6; --ink:#2B2B26;
+    --ink-soft:#726F63; --ink-faint:#A6A192; --line:#E6E1D3; --accent:#7C6FA6;
+    --accent-soft:#EFEAF5; --accent-ink:#5B4F82; --ended:#B9B4A4;
+  }
+  * { box-sizing: border-box; }
+  body{
+    background: var(--bg); color: var(--ink);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    padding-inline: 16px; padding-block: 28px; display:flex; justify-content:center;
+    margin: 0;
+  }
+  .wrap{ width:100%; max-width: 480px; }
+  .eyebrow{ font-family:'JetBrains Mono', ui-monospace, monospace; font-size:11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--accent-ink); margin-bottom: 6px; }
+  h1{ font-family:'Fraunces', Georgia, serif; font-weight: 600; font-size: 26px; margin: 0 0 22px; text-wrap: balance; }
+  .now-card{ background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 22px 22px 20px; margin-bottom: 14px; }
+  .now-top{ display:flex; align-items:baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .now-label{ font-family:'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--ink-faint); }
+  .now-period{ font-family:'Fraunces', Georgia, serif; font-size: 22px; font-weight: 600; color: var(--accent-ink); }
+  .now-countdown{ font-family:'JetBrains Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; font-size: 44px; font-weight: 500; letter-spacing: 0.5px; margin: 14px 0 4px; color: var(--ink); }
+  .now-sub{ font-size: 13px; color: var(--ink-soft); }
+  .now-bar{ height: 6px; border-radius: 99px; background: var(--surface-2); overflow:hidden; margin-top: 16px; }
+  .now-bar-fill{ height: 100%; background: var(--accent); border-radius: 99px; transition: width 1s linear; }
+  .grid{ display:grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  @media (max-width: 420px){ .grid{ grid-template-columns: 1fr; } }
+  .tile{ background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 14px 14px 13px; display:flex; flex-direction:column; gap: 6px; position: relative; }
+  .tile.is-active{ border-color: var(--accent); background: var(--accent-soft); }
+  .tile-name{ font-family:'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 1.1px; text-transform: uppercase; color: var(--ink-faint); display:flex; align-items:center; justify-content: space-between; }
+  .tile.is-active .tile-name{ color: var(--accent-ink); }
+  .dot{ width:6px; height:6px; border-radius:99px; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .tile-range{ font-size: 12px; color: var(--ink-soft); }
+  .tile-status{ font-family:'Fraunces', Georgia, serif; font-size: 16px; font-weight: 600; margin-top: 2px; }
+  .tile.is-ended .tile-status{ color: var(--ended); }
+  .tile.is-active .tile-status{ color: var(--accent-ink); }
+  .tile.is-upcoming .tile-status{ color: var(--ink); }
+  .foot{ margin-top: 16px; text-align:center; font-size: 11.5px; color: var(--ink-faint); font-family:'JetBrains Mono', ui-monospace, monospace; }
+  @media (prefers-reduced-motion: reduce){ .now-bar-fill{ transition: none; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="eyebrow" id="dateLabel">—</div>
+  <h1>Day Pulse</h1>
+
+  <div class="now-card">
+    <div class="now-top">
+      <div>
+        <div class="now-label">Right now</div>
+        <div class="now-period" id="nowPeriod">—</div>
+      </div>
+    </div>
+    <div class="now-countdown" id="nowCountdown">—</div>
+    <div class="now-sub" id="nowSub">—</div>
+    <div class="now-bar"><div class="now-bar-fill" id="nowBarFill" style="width:0%"></div></div>
+  </div>
+
+  <div class="grid" id="tileGrid"></div>
+
+  <div class="foot">Morning ends 12PM · Afternoon ends 6PM · Evening ends 12AM</div>
+</div>
+
+<script>
+(function(){
+  var PERIODS = [
+    { key:'morning',   name:'Morning',   startH:0,  endH:12 },
+    { key:'afternoon', name:'Afternoon', startH:12, endH:18 },
+    { key:'evening',   name:'Evening',   startH:18, endH:24 }
+  ];
+
+  var dateLabelEl = document.getElementById('dateLabel');
+  var nowPeriodEl = document.getElementById('nowPeriod');
+  var nowCountdownEl = document.getElementById('nowCountdown');
+  var nowSubEl = document.getElementById('nowSub');
+  var nowBarFillEl = document.getElementById('nowBarFill');
+  var tileGridEl = document.getElementById('tileGrid');
+
+  function pad(n){ return String(n).padStart(2,'0'); }
+
+  function fmtHour(h){
+    var h12 = h % 12; if (h12 === 0) h12 = 12;
+    var suffix = h < 12 ? 'AM' : 'PM';
+    return h12 + ':00 ' + suffix;
+  }
+
+  function fmtDuration(ms){
+    var totalSec = Math.max(0, Math.floor(ms/1000));
+    var h = Math.floor(totalSec/3600);
+    var m = Math.floor((totalSec%3600)/60);
+    var s = totalSec%60;
+    if (h > 0) return h + 'h ' + pad(m) + 'm ' + pad(s) + 's';
+    return m + 'm ' + pad(s) + 's';
+  }
+
+  function buildTiles(){
+    tileGridEl.innerHTML = '';
+    PERIODS.forEach(function(p){
+      var tile = document.createElement('div');
+      tile.className = 'tile';
+      tile.id = 'tile-' + p.key;
+      tile.innerHTML =
+        '<div class="tile-name"><span>' + p.name + '</span><span class="dot" style="visibility:hidden"></span></div>' +
+        '<div class="tile-range">' + fmtHour(p.startH) + ' – ' + fmtHour(p.endH === 24 ? 0 : p.endH) + '</div>' +
+        '<div class="tile-status" id="status-' + p.key + '">—</div>';
+      tileGridEl.appendChild(tile);
+    });
+  }
+
+  function tick(){
+    var now = new Date();
+    var h = now.getHours(), m = now.getMinutes(), s = now.getSeconds(), ms = now.getMilliseconds();
+    var nowMs = ((h*60 + m)*60 + s)*1000 + ms;
+    var dayMs = 24*60*60*1000;
+
+    dateLabelEl.textContent = now.toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric' });
+
+    var current = null;
+    PERIODS.forEach(function(p){
+      var startMs = p.startH*60*60*1000;
+      var endMs = p.endH*60*60*1000;
+      var tile = document.getElementById('tile-' + p.key);
+      var statusEl = document.getElementById('status-' + p.key);
+      var dotEl = tile.querySelector('.dot');
+
+      tile.classList.remove('is-active','is-ended','is-upcoming');
+
+      if (nowMs >= endMs){
+        tile.classList.add('is-ended');
+        statusEl.textContent = 'Ended';
+        dotEl.style.visibility = 'hidden';
+      } else if (nowMs >= startMs && nowMs < endMs){
+        tile.classList.add('is-active');
+        statusEl.textContent = fmtDuration(endMs - nowMs) + ' left';
+        dotEl.style.visibility = 'visible';
+        current = { p:p, startMs:startMs, endMs:endMs };
+      } else {
+        tile.classList.add('is-upcoming');
+        statusEl.textContent = 'Starts at ' + fmtHour(p.startH);
+        dotEl.style.visibility = 'hidden';
+      }
+    });
+
+    if (current){
+      nowPeriodEl.textContent = current.p.name;
+      nowCountdownEl.textContent = fmtDuration(current.endMs - nowMs);
+      nowSubEl.textContent = 'left until ' + current.p.name.toLowerCase() + ' ends at ' + fmtHour(current.p.endH === 24 ? 0 : current.p.endH);
+      var pct = ((nowMs - current.startMs) / (current.endMs - current.startMs)) * 100;
+      nowBarFillEl.style.width = Math.min(100, Math.max(0, pct)) + '%';
+    } else {
+      nowPeriodEl.textContent = 'Day complete';
+      nowCountdownEl.textContent = fmtDuration(dayMs - nowMs);
+      nowSubEl.textContent = 'left until morning begins';
+      nowBarFillEl.style.width = '100%';
+    }
+  }
+
+  buildTiles();
+  tick();
+  setInterval(tick, 1000);
+})();
+</script>
+
+</body>
+</html>
